@@ -22,6 +22,9 @@ COPY src/     src/
 COPY api/     api/
 COPY ingest/  ingest/
 COPY frontend/ frontend/
+COPY scripts/ scripts/
+
+RUN chmod +x /app/scripts/start.sh
 
 # Create store directory
 RUN mkdir -p /data/store
@@ -31,5 +34,5 @@ ENV PYTHONPATH=/app/src:/app
 
 EXPOSE 8000
 
-# Start FastAPI (store is mounted as a volume in production)
-CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Start via start.sh (auto-binds to $PORT and spawns background ingest worker)
+CMD ["/app/scripts/start.sh"]

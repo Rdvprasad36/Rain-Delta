@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: rain-delta
+    env: docker
+    plan: free
+    region: oregon
+    autoDeploy: true
+    healthCheckPath: /api/health
+    envVars:
+      - key: STORE_DIR
+        value: /data/store
+      - key: ENABLE_INGEST_WORKER
+        value: "true"
+      - key: ECMWF_SOURCE
+        value: ecmwf
+      - key: RETENTION_DAYS
+        value: "14"
+      - key: REGION_LAT_MIN
+        value: "5.0"
+      - key: REGION_LAT_MAX
+        value: "23.0"
+      - key: REGION_LON_MIN
+        value: "78.0"
+      - key: REGION_LON_MAX
+        value: "100.0"

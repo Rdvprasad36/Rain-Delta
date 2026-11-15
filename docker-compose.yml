@@ -9,6 +9,7 @@ services:
       - monsoon-store:/data/store
     environment:
       - STORE_DIR=/data/store
+      - ENABLE_INGEST_WORKER=false
       - ECMWF_SOURCE=ecmwf
       - RETENTION_DAYS=14
       - REGION_LAT_MIN=5.0
