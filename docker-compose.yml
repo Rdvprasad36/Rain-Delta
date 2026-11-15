@@ -1,0 +1,49 @@
+version: "3.9"
+
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - monsoon-store:/data/store
+    environment:
+      - STORE_DIR=/data/store
+      - ECMWF_SOURCE=ecmwf
+      - RETENTION_DAYS=14
+      - REGION_LAT_MIN=5.0
+      - REGION_LAT_MAX=23.0
+      - REGION_LON_MIN=78.0
+      - REGION_LON_MAX=100.0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+  ingest:
+    build: .
+    volumes:
+      - monsoon-store:/data/store
+    environment:
+      - STORE_DIR=/data/store
+      - ECMWF_SOURCE=ecmwf
+      - RETENTION_DAYS=14
+      - REGION_LAT_MIN=5.0
+      - REGION_LAT_MAX=23.0
+      - REGION_LON_MIN=78.0
+      - REGION_LON_MAX=100.0
+    command: >
+      sh -c "while true; do
+        python -m ingest.run;
+        sleep 10800;
+      done"
+    restart: unless-stopped
+    depends_on:
+      - api
+
+volumes:
+  monsoon-store:
+    driver: local

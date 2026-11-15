@@ -1,0 +1,90 @@
+name: MonsoonDelta CI
+
+on:
+  push:
+    branches: ["main", "develop"]
+  pull_request:
+    branches: ["main"]
+
+env:
+  PYTHONPATH: ${{ github.workspace }}/src:${{ github.workspace }}
+  STORE_DIR: ${{ github.workspace }}/store
+
+jobs:
+  test:
+    name: Tests & Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install fastapi uvicorn numpy xarray scipy pytest pytest-timeout httpx
+          pip install pycodestyle
+
+      - name: Run tests
+        run: |
+          pytest tests/test_compute.py tests/test_explain.py tests/test_api.py \
+            -v --timeout=30 --tb=short
+
+      - name: Lint (pycodestyle)
+        run: |
+          pycodestyle src/monsoon/ api/ ingest/ \
+            --max-line-length=100 \
+            --ignore=E501,W503 \
+            || true
+
+  docker-build:
+    name: Docker Build Check
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t monsoon-delta:ci .
+
+  ingest-check:
+    name: Scheduled Ingest Smoke Test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install numpy scipy
+
+      - name: Verify compute library imports
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, 'src')
+          from monsoon.compute import to_mm, window_totals, revision, disagreement
+          from monsoon.explain import explain_all
+          from monsoon.constants import DISCLAIMER, ATTRIBUTION
+          print('All imports OK')
+          print('Disclaimer length:', len(DISCLAIMER))
+          print('Attribution length:', len(ATTRIBUTION))
+          "
