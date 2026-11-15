@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0" />
+  <title>MonsoonDelta — Bay of Bengal Precipitation Forecast</title>
+  <meta name="description" content="ECMWF IFS and AIFS precipitation forecast revision for Bay of Bengal. Not an official forecast." />
+
+  <!-- Three.js CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     THREE.JS BACKGROUND CANVAS
+     ══════════════════════════════════════════════════════════════════════════ -->
+<canvas id="bg-canvas"></canvas>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     DISCLAIMER BAR
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="disclaimer-bar" role="alert">
+  <span class="disclaimer-icon">ℹ️</span>
+  <span class="disclaimer-text">
+    This is automated model output from ECMWF IFS and AIFS.
+    <strong>It is not an official forecast or advisory.</strong>
+    For official guidance, follow <a href="https://mausam.imd.gov.in" target="_blank" rel="noopener">IMD</a> and local authorities.
+  </span>
+  <a href="methods.html" class="disclaimer-link">Details →</a>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     STALE BANNER (shown when data is old)
+     ══════════════════════════════════════════════════════════════════════════ -->
+<div class="stale-banner" id="stale-banner" hidden>
+  ⏰ Latest data is older than expected. Showing last available run from <span id="stale-time">—</span>.
+</div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     HEADER / NAV
+     ══════════════════════════════════════════════════════════════════════════ -->
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-group">
+      <div class="logo-orb"></div>
+      <span class="logo-text">Monsoon<span class="logo-delta">Δ</span></span>
+    </div>
+    <nav class="header-nav">
+      <span class="nav-label">Location:</span>
+      <div class="location-select-wrapper">
+        <select id="location-select" aria-label="Select location">
+          <option value="17.7,83.2">Visakhapatnam</option>
+          <option value="13.0,80.3">Chennai</option>
+          <option value="20.3,85.8">Bhubaneswar</option>
+          <option value="16.5,80.6">Vijayawada</option>
+          <option value="17.4,78.5">Hyderabad</option>
+        </select>
+      </div>
+      <a href="methods.html" class="nav-btn">Methods</a>
+    </nav>
+  </div>
+</header>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     HERO SECTION
+     ══════════════════════════════════════════════════════════════════════════ -->
+<section class="hero-section">
+  <div class="hero-content">
+    <h1 class="hero-title">Bay of Bengal<br/><span class="hero-accent">Precipitation Forecast</span></h1>
+    <p class="hero-subtitle">IFS &amp; AIFS model comparison · 6-hour windows · Forecast revision</p>
+    <div class="hero-badges">
+      <span class="badge badge-blue">0.25° Grid</span>
+      <span class="badge badge-teal">CC BY 4.0</span>
+      <span class="badge badge-purple">ECMWF Open Data</span>
+    </div>
+  </div>
+  <div class="hero-3d-container" id="globe-container">
+    <!-- Three.js globe inserted here -->
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MAIN CONTENT
+     ══════════════════════════════════════════════════════════════════════════ -->
+<main class="main-content" id="main">
+
+  <!-- Run info bar -->
+  <div class="run-info-bar" id="run-info-bar">
+    <div class="run-info-item">
+      <span class="run-label">IFS run</span>
+      <span class="run-value" id="ifs-run-time">Loading…</span>
+    </div>
+    <div class="run-divider"></div>
+    <div class="run-info-item">
+      <span class="run-label">AIFS run</span>
+      <span class="run-value" id="aifs-run-time">Loading…</span>
+    </div>
+    <div class="run-divider"></div>
+    <div class="run-info-item">
+      <span class="run-label">Updated</span>
+      <span class="run-value" id="updated-time">—</span>
+    </div>
+  </div>
+
+  <!-- ── SECTION 1: LATEST FORECAST ─────────────────────────────────────── -->
+  <section class="card glass-card animate-in" id="latest-section">
+    <div class="card-header">
+      <h2 class="card-title">
+        <span class="card-icon">🌧️</span>
+        Latest 6-Hour Rainfall (mm)
+      </h2>
+      <div class="card-subtitle">IFS vs AIFS · tap a bar to inspect that window</div>
+    </div>
+    <div class="chart-wrapper">
+      <canvas id="latest-chart" aria-label="Bar chart of 6-hour precipitation forecasts"></canvas>
+    </div>
+    <div class="chart-legend">
+      <span class="legend-dot" style="background:#38bdf8"></span> IFS
+      <span class="legend-dot" style="background:#a78bfa; margin-left:1.2rem"></span> AIFS
+    </div>
+    <div class="loading-overlay" id="latest-loading">
+      <div class="spinner"></div>
+      <span>Fetching forecast data…</span>
+    </div>
+  </section>
+
+  <!-- ── SECTION 2 + 3: REVISION + DISAGREEMENT ─────────────────────────── -->
+  <div class="two-col-grid">
+
+    <!-- Revision Card -->
+    <section class="card glass-card animate-in" id="revision-section">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">📈</span>
+          Forecast Revision
+        </h2>
+        <div class="card-subtitle" id="revision-window-label">Select a window above</div>
+      </div>
+      <div class="chart-wrapper chart-wrapper--small">
+        <canvas id="revision-chart" aria-label="Line chart of forecast revision across runs"></canvas>
+      </div>
+      <div class="revision-stats" id="revision-stats">
+        <div class="stat-row">
+          <span class="stat-label">Latest change</span>
+          <span class="stat-value" id="stat-change">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Range across runs</span>
+          <span class="stat-value" id="stat-range">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Direction</span>
+          <span class="stat-value direction-badge" id="stat-direction">—</span>
+        </div>
+      </div>
+      <div class="loading-overlay" id="revision-loading">
+        <div class="spinner"></div>
+        <span>Computing revision…</span>
+      </div>
+    </section>
+
+    <!-- Disagreement Card -->
+    <section class="card glass-card animate-in" id="disagree-section">
+      <div class="card-header">
+        <h2 class="card-title">
+          <span class="card-icon">🗺️</span>
+          Model Disagreement
+        </h2>
+        <div class="card-subtitle">IFS minus AIFS (mm)</div>
+      </div>
+      <div id="disagree-map" class="map-container" role="img" aria-label="Map showing IFS minus AIFS disagreement"></div>
+      <div class="disagree-stats" id="disagree-stats">
+        <div class="stat-row">
+          <span class="stat-label">IFS</span>
+          <span class="stat-value" id="stat-ifs-mm">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">AIFS</span>
+          <span class="stat-value" id="stat-aifs-mm">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Difference</span>
+          <span class="stat-value" id="stat-diff-mm">—</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Wetter model</span>
+          <span class="stat-value wetter-badge" id="stat-wetter">—</span>
+        </div>
+      </div>
+      <div class="loading-overlay" id="disagree-loading">
+        <div class="spinner"></div>
+        <span>Comparing models…</span>
+      </div>
+    </section>
+  </div>
+
+  <!-- ── SECTION 4: PLAIN WORDS ───────────────────────────────────────────── -->
+  <section class="card glass-card plain-words-card animate-in" id="words-section">
+    <div class="card-header">
+      <h2 class="card-title">
+        <span class="card-icon">💬</span>
+        In Plain Words
+      </h2>
+    </div>
+    <div class="plain-words-body" id="plain-words-body">
+      <div class="words-loading">
+        <div class="spinner"></div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     FOOTER
+     ══════════════════════════════════════════════════════════════════════════ -->
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="attribution-block">
+      <p>
+        This service is based on data and products of the
+        <strong>European Centre for Medium-Range Weather Forecasts (ECMWF)</strong>.
+        © 2026 ECMWF. Source: <a href="https://www.ecmwf.int" target="_blank" rel="noopener">www.ecmwf.int</a>.
+        Licence:
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+        ECMWF does not accept any liability for any error or omission in the data,
+        their availability, or for any loss or damage arising from their use.
+        Values shown are <em>derived</em> (6-hour totals, differences between runs),
+        so the material has been modified.
+      </p>
+    </div>
+    <div class="footer-links">
+      <a href="methods.html">Methods &amp; Limits</a>
+      <span>·</span>
+      <a href="https://github.com/Rdvprasad36/Rain-Delta" target="_blank" rel="noopener">GitHub</a>
+      <span>·</span>
+      <a href="/api/health" target="_blank" rel="noopener">API Health</a>
+    </div>
+    <div class="footer-made">
+      Built for QUEST Lab · Bay of Bengal Research Initiative
+    </div>
+  </div>
+</footer>
+
+<script src="js/app.js"></script>
+</body>
+</html>

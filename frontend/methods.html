@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Methods &amp; Limits — MonsoonDelta</title>
+  <meta name="description" content="How MonsoonDelta computes 6-hour totals, revision, and model disagreement from ECMWF IFS and AIFS open data." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/methods.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div class="disclaimer-bar" role="alert">
+  <span class="disclaimer-icon">ℹ️</span>
+  <span class="disclaimer-text">
+    This is automated model output from ECMWF IFS and AIFS.
+    <strong>It is not an official forecast or advisory.</strong>
+    For official guidance follow <a href="https://mausam.imd.gov.in" target="_blank" rel="noopener">IMD</a>.
+  </span>
+</div>
+
+<header class="site-header">
+  <div class="header-inner">
+    <div class="logo-group">
+      <div class="logo-orb"></div>
+      <span class="logo-text">Monsoon<span class="logo-delta">Δ</span></span>
+    </div>
+    <nav class="header-nav">
+      <a href="index.html" class="nav-btn">← Dashboard</a>
+    </nav>
+  </div>
+</header>
+
+<div class="methods-hero">
+  <h1>Methods &amp; Limits</h1>
+  <p>How the numbers are computed, what they mean, and what they cannot tell you.</p>
+</div>
+
+<main class="methods-content">
+
+  <section class="methods-section">
+    <h2>🌐 Data Sources</h2>
+    <p>MonsoonDelta uses <strong>ECMWF open data</strong> — freely available via
+      <a href="https://data.ecmwf.int" target="_blank" rel="noopener">data.ecmwf.int</a>
+      under the <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a> licence.
+      No API key is required. Two models are used:</p>
+    <ul>
+      <li><strong>IFS</strong> (Integrated Forecasting System) — class=od, stream=oper, type=fc.
+          Run 4× daily at 00/06/12/18 UTC. 0.25° global grid.</li>
+      <li><strong>AIFS Single</strong> (AI-based IFS) — model=aifs-single, stream=oper, type=fc.
+          Run 2× daily at 00/12 UTC. 0.25° global grid. Steps 6-hourly to 360 h.</li>
+    </ul>
+    <p>Parameter: <code>tp</code> (total precipitation, paramId 228 for IFS, 228228 for AIFS).
+       Units are read from the GRIB <code>units</code> key; unknown units raise an error and halt ingestion.</p>
+  </section>
+
+  <section class="methods-section">
+    <h2>🔢 Accumulation and 6-Hour Totals</h2>
+    <p><code>tp</code> is a <strong>cumulative</strong> field: it records the total precipitation
+       since the forecast start (step 0). To get a 6-hour window total:</p>
+    <div class="formula-block">
+      W(s) = tp(s) − tp(s − 6h)   [mm]<br/>
+      Special case: W(6) = tp(6)  since tp(0) = 0
+    </div>
+    <p><strong>Unit conversion</strong></p>
+    <ul>
+      <li>IFS: units = metres → multiply by 1000 to get mm.</li>
+      <li>AIFS: units = kg m⁻² → 1 kg m⁻² of liquid water = 1 mm depth (no conversion needed).</li>
+    </ul>
+    <p><strong>Hand-checked example</strong> (from PRD §2.2):</p>
+    <div class="formula-block">
+      IFS:  tp(12h) = 0.002 m = 2.0 mm;  tp(18h) = 0.005 m = 5.0 mm<br/>
+      W(18h) = 5.0 − 2.0 = 3.0 mm  ✓<br/><br/>
+      AIFS: tp(12h) = 2.0 kg m⁻²;  tp(18h) = 5.0 kg m⁻²<br/>
+      W(18h) = 5.0 − 2.0 = 3.0 mm  ✓
+    </div>
+    <p>Tiny negative differences (&gt; −0.05 mm) caused by GRIB packing are clamped to 0 and logged.
+       Larger negatives indicate a data problem and halt processing with an error.</p>
+  </section>
+
+  <section class="methods-section">
+    <h2>📈 Forecast Revision</h2>
+    <p>Fix a valid 6-hour window ending at time T. Each model run r that
+       covers T (i.e. its lead time is long enough) gives a 6-hour total A_r(T).
+       We collect the last N runs (default 6), skipping any that do not cover T.</p>
+    <div class="formula-block">
+      Latest change = A_latest − A_previous  [mm]<br/>
+      Range         = max(A_r) − min(A_r)    [mm]<br/>
+      Direction     = "up" | "down" | "steady" (|change| &lt; 0.5 mm)
+    </div>
+    <p><strong>Hand-checked example</strong> (PRD §2.3):</p>
+    <div class="formula-block">
+      Runs 00Z → 06Z → 12Z:  4.0, 10.0, 7.0 mm<br/>
+      Latest change = 7.0 − 10.0 = −3.0 mm  (down)  ✓<br/>
+      Range         = 10.0 − 4.0 = 6.0 mm             ✓
+    </div>
+    <p>A run that does not reach the target window is <em>skipped</em>; it is never zero-filled.</p>
+  </section>
+
+  <section class="methods-section">
+    <h2>🔀 Model Disagreement</h2>
+    <p>For the same valid window, using the most recent run from each model:</p>
+    <div class="formula-block">
+      D = IFS_mm − AIFS_mm   [mm]<br/>
+      Positive D → IFS is wetter. Negative D → AIFS is wetter.
+    </div>
+    <p>Percentage difference is not shown when <em>both</em> models produce less than 1 mm
+       (the ratio becomes misleading for tiny values).</p>
+    <p><strong>Hand-checked example</strong> (PRD §2.4):</p>
+    <div class="formula-block">
+      IFS = 7.0 mm, AIFS = 3.0 mm → D = +4.0 mm (IFS wetter)  ✓
+    </div>
+  </section>
+
+  <section class="methods-section">
+    <h2>📍 Point Extraction</h2>
+    <p>The displayed value for a location is the area mean of the 4 surrounding
+       0.25° grid cells (bilinear-style), not a single nearest cell. This reduces
+       single-cell noise for coastal locations like Visakhapatnam (~17.7°N, 83.2°E).</p>
+  </section>
+
+  <section class="methods-section">
+    <h2>🏷️ Descriptive Bands (6-hour totals)</h2>
+    <p>These are <strong>our own neutral labels</strong>, not IMD official categories.
+       They are used only to describe values in plain language.</p>
+    <table class="band-table">
+      <thead><tr><th>Range (mm per 6 h)</th><th>Label</th></tr></thead>
+      <tbody>
+        <tr><td>&lt; 1</td><td>negligible</td></tr>
+        <tr><td>1 – &lt;5</td><td>light</td></tr>
+        <tr><td>5 – &lt;15</td><td>moderate</td></tr>
+        <tr><td>15 – &lt;30</td><td>heavy</td></tr>
+        <tr><td>≥ 30</td><td>very heavy</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="methods-section">
+    <h2 style="color:#fbbf24">⚠️ Known Limits</h2>
+    <ul class="limits-list">
+      <li>Grid resolution is 0.25° (~28 km). Local terrain, urban effects, and coastal
+          gradients are not captured.</li>
+      <li>IFS and AIFS are global models; they do not replace high-resolution
+          local or convective-scale forecasts.</li>
+      <li>ECMWF retains open-data files for only a few days. MonsoonDelta stores
+          the last 14 days internally, but older history is not available.</li>
+      <li>AIFS is an experimental AI-based model. Its uncertainty characteristics
+          differ from IFS and are not fully understood.</li>
+      <li>This service does not provide ensemble probability estimates.</li>
+      <li>Units and file availability were verified from ECMWF documentation;
+          some details may change with new model versions.</li>
+    </ul>
+  </section>
+
+  <section class="methods-section">
+    <h2>📄 Licence &amp; Attribution</h2>
+    <p>
+      This service is based on data and products of the
+      <strong>European Centre for Medium-Range Weather Forecasts (ECMWF)</strong>.
+      © 2026 ECMWF. Source:
+      <a href="https://www.ecmwf.int" target="_blank" rel="noopener">www.ecmwf.int</a>.
+      Licence: <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>.
+      ECMWF does not accept any liability for any error or omission in the data,
+      their availability, or for any loss or damage arising from their use.
+      Values shown are <em>derived</em> (6-hour totals, differences between runs),
+      so the material has been modified.
+    </p>
+    <p style="margin-top:0.75rem">
+      Application source code:
+      <a href="https://github.com/Rdvprasad36/Rain-Delta" target="_blank" rel="noopener">
+        github.com/Rdvprasad36/Rain-Delta
+      </a> — MIT Licence (code only; data licence is separate).
+    </p>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="footer-inner">
+    <div class="footer-links">
+      <a href="index.html">← Dashboard</a>
+      <span>·</span>
+      <a href="https://github.com/Rdvprasad36/Rain-Delta" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <div class="footer-made">Built for QUEST Lab · Bay of Bengal Research Initiative</div>
+  </div>
+</footer>
+
+<script>
+// Reuse the Three.js background from the main page
+(function() {
+  const canvas = document.getElementById('bg-canvas');
+  if (!canvas || typeof THREE === 'undefined') return;
+  const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.z = 5;
+  const count = 1200;
+  const pos = new Float32Array(count * 3);
+  const col = new Float32Array(count * 3);
+  const palette = [new THREE.Color('#38bdf8'), new THREE.Color('#a78bfa'), new THREE.Color('#2dd4bf')];
+  for (let i = 0; i < count; i++) {
+    pos[i*3]   = (Math.random()-0.5)*20;
+    pos[i*3+1] = (Math.random()-0.5)*20;
+    pos[i*3+2] = (Math.random()-0.5)*10;
+    const c = palette[Math.floor(Math.random()*palette.length)];
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('color',    new THREE.BufferAttribute(col, 3));
+  const mat = new THREE.PointsMaterial({ size: 0.04, vertexColors: true, transparent: true, opacity: 0.5 });
+  const pts = new THREE.Points(geo, mat);
+  scene.add(pts);
+  (function animate() {
+    requestAnimationFrame(animate);
+    pts.rotation.y += 0.0002;
+    renderer.render(scene, camera);
+  })();
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+})();
+</script>
+</body>
+</html>
