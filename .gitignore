@@ -1,0 +1,48 @@
+# MonsoonDelta — Git Ignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Data / Store (runtime data, NOT test fixtures)
+store/
+tests/raw/
+
+# Secrets (should not exist — no keys needed — but just in case)
+.env
+*.key
+*.pem
+secrets/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+monsoon-store/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
